@@ -1,0 +1,762 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fitness Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js"></script>
+  <link href="https://fonts.cdnfonts.com/css/sf-pro-display" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #f5f5f7;
+      color: #1d1d1f;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 40px 20px;
+      transition: background-color 0.3s, color 0.3s;
+    }
+    .dark-mode {
+      background-color: #1c1c1e;
+      color: #f5f5f7;
+    }
+    .mobile-mode .container {
+      max-width: 400px;
+    }
+    .mobile-mode canvas {
+      max-width: 360px;
+    }
+    .mobile-mode select, .mobile-mode button, .mobile-mode input[type="number"], .mobile-mode .link-button {
+      font-size: 16px;
+      padding: 12px 18px;
+    }
+    .mobile-mode .timer-display {
+      font-size: 30px;
+    }
+    .mobile-mode .metrics {
+      font-size: 16px;
+    }
+    .mobile-mode h2 {
+      font-size: 18px;
+    }
+    h1 {
+      font-size: 40px;
+      font-weight: 600;
+      margin-bottom: 20px;
+      letter-spacing: -0.02em;
+    }
+    .container {
+      width: 100%;
+      max-width: 980px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+    .section {
+      background: #fff;
+      border-radius: 18px;
+      padding: 20px;
+      width: 100%;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
+      transition: transform 0.3s, box-shadow 0.3s;
+      text-align: center;
+    }
+    .dark-mode .section {
+      background: #2c2c2e;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+    }
+    .section:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 40px rgba(0, 0, 0, 0.1);
+    }
+    canvas {
+      width: 100%;
+      max-width: 640px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      margin: 20px 0;
+      display: block;
+    }
+    select, button {
+      font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 17px;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 10px;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      cursor: pointer;
+      transition: background 0.3s, transform 0.2s;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+    }
+    .dark-mode select, .dark-mode button {
+      background: #3a3a3c;
+      color: #f5f5f7;
+    }
+    select:hover, button:hover {
+      background: #e8e8ed;
+      transform: translateY(-1px);
+    }
+    .dark-mode select:hover, .dark-mode button:hover {
+      background: #4a4a4c;
+    }
+    button:active {
+      transform: translateY(0);
+    }
+    select {
+      padding-right: 30px;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="%231d1d1f" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4z"/></svg>');
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+    }
+    .dark-mode select {
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="%23f5f5f7" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4z"/></svg>');
+    }
+    input[type="number"] {
+      font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 17px;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 10px;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      width: 100px;
+      text-align: center;
+      -webkit-appearance: none;
+      -moz-appearance: textfield;
+    }
+    .dark-mode input[type="number"] {
+      background: #3a3a3c;
+      color: #f5f5f7;
+    }
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    .timer-display {
+      font-size: 32px;
+      font-weight: 600;
+      margin: 10px 0;
+      font-family: 'SF Pro Display', sans-serif;
+    }
+    .metrics {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      font-size: 17px;
+      font-weight: 500;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .theme-toggle {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 8px;
+      background: #f5f5f7;
+      border-radius: 50%;
+    }
+    .dark-mode .theme-toggle {
+      background: #3a3a3c;
+    }
+    .footer {
+      margin-top: 40px;
+      font-family: 'SF Pro Text', sans-serif;
+      font-size: 14px;
+      color: #86868b;
+      text-align: center;
+    }
+    .dark-mode .footer {
+      color: #d2d2d7;
+    }
+    .nav-link {
+      font-family: 'SF Pro Text', sans-serif;
+      font-size: 17px;
+      color: #0071e3;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 10px;
+      transition: color 0.3s, transform 0.2s;
+    }
+    .dark-mode .nav-link {
+      color: #2997ff;
+    }
+    .nav-link:hover {
+      color: #005bb5;
+      transform: translateY(-1px);
+    }
+    .dark-mode .nav-link:hover {
+      color: #1c80ff;
+    }
+    .link-button {
+      font-family: 'SF Pro Text', sans-serif;
+      font-size: 17px;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 10px;
+      background: #0071e3;
+      color: #fff;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.3s, transform 0.2s;
+    }
+    .dark-mode .link-button {
+      background: #2997ff;
+    }
+    .link-button:hover {
+      background: #005bb5;
+      transform: translateY(-1px);
+    }
+    .dark-mode .link-button:hover {
+      background: #1c80ff;
+    }
+    .link-button:active {
+      transform: translateY(0);
+    }
+    #aboutSection {
+      display: none;
+    }
+    #mainContent {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+    }
+    p {
+      font-family: 'SF Pro Text', sans-serif;
+      font-size: 17px;
+      line-height: 1.5;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 768px) {
+      h1 {
+        font-size: 32px;
+      }
+      .section {
+        padding: 15px;
+      }
+      canvas {
+        max-width: 100%;
+      }
+      select, button, .link-button, input[type="number"] {
+        font-size: 15px;
+        padding: 8px 12px;
+      }
+      .timer-display {
+        font-size: 28px;
+      }
+      .metrics {
+        font-size: 15px;
+      }
+      .footer {
+        font-size: 12px;
+      }
+      p {
+        font-size: 15px;
+      }
+    }
+  </style>
+</head>
+<body class="desktop-mode">
+  <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+  <div class="container">
+    <div id="mainContent">
+      <h1>Fitness Tracker</h1>
+      <button class="nav-link" onclick="toggleAbout()">About</button>
+      <canvas id="canvas"></canvas>
+      <div class="section">
+        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 15px;">Settings</h2>
+        <select id="modeSelector" onchange="updateMode()">
+          <option value="desktop" selected>Desktop Mode</option>
+          <option value="mobile">Mobile Mode</option>
+        </select>
+      </div>
+      <div class="section">
+        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 15px;">Exercise</h2>
+        <select id="exerciseDropdown" onchange="updateExercise()">
+          <option value="squats" selected>Squats</option>
+          <option value="pushups">Push-ups</option>
+          <option value="situps">Sit-ups</option>
+          <option value="jumping_jacks">Jumping Jacks</option>
+        </select>
+        <div class="controls">
+          <button onclick="resetExercise()">Reset Exercise</button>
+        </div>
+      </div>
+      <div class="section">
+        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 15px;">Timer</h2>
+        <select id="timerModeSelector" onchange="switchTimerMode()">
+          <option value="timer">Timer</option>
+          <option value="stopwatch">Stopwatch</option>
+        </select>
+        <div id="timerControls" class="controls">
+          <input type="number" id="timerMinutes" placeholder="Min" min="0">
+          <input type="number" id="timerSeconds" placeholder="Sec" min="0" max="59">
+        </div>
+        <div class="timer-display" id="timeDisplay">00:00</div>
+        <div class="controls">
+          <button onclick="startTimer()">Start</button>
+          <button onclick="stopTimer()">Stop</button>
+          <button onclick="resetTimer()">Reset</button>
+        </div>
+      </div>
+      <div class="section">
+        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 15px;">Metrics</h2>
+        <div class="metrics">
+          <p>Reps: <span id="repCount">0</span></p>
+          <p>Time: <span id="autoTimer">00:00</span></p>
+        </div>
+        <div class="controls">
+          <button onclick="resetAll()">Reset All</button>
+        </div>
+      </div>
+    </div>
+    <div id="aboutSection" class="section">
+      <h1>About Fitness Tracker</h1>
+      <p>The Fitness Tracker is a sleek, webcam-based tool designed to help you track your workouts with precision. Built with cutting-edge pose detection, it supports exercises like squats, push-ups, sit-ups, and jumping jacks, offering real-time rep counting and timing.</p>
+      <p>Connect with the community and stay updated:</p>
+      <div class="controls">
+        <a href="https://discord.com/invite/4MAyqtU7fc" class="link-button" target="_blank">Join the Discord</a>
+        <a href="https://youtube.com/@mr.extrarandom" class="link-button" target="_blank">Watch Videos Here</a>
+      </div>
+      <div class="controls" style="margin-top: 20px;">
+        <button class="nav-link" onclick="toggleAbout()">Back to Tracker</button>
+      </div>
+    </div>
+    <div class="footer">Made by Mr.ExtraRandom</div>
+  </div>
+
+  <script>
+    // Timer/Stopwatch variables
+    let timerInterval;
+    let isStopwatch = false;
+    let manualTime = 0;
+
+    // Exercise tracking variables
+    let repCount = 0;
+    let isInRep = false;
+    let lastRepTime = 0;
+    const MIN_REP_INTERVAL = 500;
+    let autoTimerStart = null;
+    let autoTimerInterval = null;
+    let currentExercise = 'squats';
+
+    // DOM elements
+    const canvasElement = document.getElementById('canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const repCountElement = document.getElementById('repCount');
+    const autoTimerElement = document.getElementById('autoTimer');
+
+    // Create video element for pose detection
+    const videoElement = document.createElement('video');
+    videoElement.width = 640;
+    videoElement.height = 480;
+    videoElement.autoplay = true;
+
+    // Initialize MediaPipe Pose
+    const pose = new Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${file}`
+    });
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+    pose.onResults(onResults);
+
+    // Landmark smoothing
+    const landmarkBuffer = [];
+    const BUFFER_SIZE = 3;
+
+    function onResults(results) {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      if (results.image) {
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+      }
+      if (results.poseLandmarks) {
+        landmarkBuffer.push([...results.poseLandmarks]);
+        if (landmarkBuffer.length > BUFFER_SIZE) landmarkBuffer.shift();
+        const smoothedLandmarks = [];
+        for (let i = 0; i < results.poseLandmarks.length; i++) {
+          const avgLandmark = { x: 0, y: 0, z: 0, visibility: 0 };
+          let count = 0;
+          for (const frame of landmarkBuffer) {
+            if (frame[i]) {
+              avgLandmark.x += frame[i].x;
+              avgLandmark.y += frame[i].y;
+              avgLandmark.z += frame[i].z;
+              avgLandmark.visibility += frame[i].visibility;
+              count++;
+            }
+          }
+          if (count > 0) {
+            avgLandmark.x /= count;
+            avgLandmark.y /= count;
+            avgLandmark.z /= count;
+            avgLandmark.visibility /= count;
+          }
+          smoothedLandmarks.push(avgLandmark);
+        }
+        const lineConnections = [
+          { indices: [11, 13], color: '#0071e3' },
+          { indices: [13, 15], color: '#0071e3' },
+          { indices: [12, 14], color: '#0071e3' },
+          { indices: [14, 16], color: '#0071e3' },
+          { indices: [11, 23], color: '#86868b' },
+          { indices: [12, 24], color: '#86868b' },
+          { indices: [23, 24], color: '#86868b' },
+          { indices: [23, 25], color: '#0071e3' },
+          { indices: [25, 27], color: '#0071e3' },
+          { indices: [24, 26], color: '#0071e3' },
+          { indices: [26, 28], color: '#0071e3' }
+        ];
+        canvasCtx.lineWidth = 3;
+        for (const { indices: [start, end], color } of lineConnections) {
+          const startLandmark = smoothedLandmarks[start];
+          const endLandmark = smoothedLandmarks[end];
+          canvasCtx.beginPath();
+          canvasCtx.moveTo(startLandmark.x * canvasElement.width, startLandmark.y * canvasElement.height);
+          canvasCtx.lineTo(endLandmark.x * canvasElement.width, endLandmark.y * canvasElement.height);
+          canvasCtx.strokeStyle = color;
+          canvasCtx.stroke();
+        }
+        const facialLandmarks = [
+          { index: 0, color: '#ff2d55' },
+          { index: 1, color: '#ff9500' },
+          { index: 2, color: '#ff9500' },
+          { index: 3, color: '#ff9500' },
+          { index: 4, color: '#ff9500' }
+        ];
+        for (const { index, color } of facialLandmarks) {
+          const landmark = smoothedLandmarks[index];
+          const x = landmark.x * canvasElement.width;
+          const y = landmark.y * canvasElement.height;
+          canvasCtx.beginPath();
+          canvasCtx.arc(x, y, 4, 0, 2 * Math.PI);
+          canvasCtx.fillStyle = color;
+          canvasCtx.fill();
+        }
+        const currentTime = Date.now();
+        if (currentExercise === 'squats') {
+          const leftHip = smoothedLandmarks[23];
+          const leftKnee = smoothedLandmarks[25];
+          const leftAnkle = smoothedLandmarks[27];
+          const rightHip = smoothedLandmarks[24];
+          const rightKnee = smoothedLandmarks[26];
+          const rightAnkle = smoothedLandmarks[28];
+          if (leftHip && leftKnee && leftAnkle && rightHip && rightKnee && rightAnkle) {
+            const leftKneeAngle = calculateAngle(
+              { x: leftHip.x, y: leftHip.y },
+              { x: leftKnee.x, y: leftKnee.y },
+              { x: leftAnkle.x, y: leftAnkle.y }
+            );
+            const rightKneeAngle = calculateAngle(
+              { x: rightHip.x, y: rightHip.y },
+              { x: rightKnee.x, y: rightKnee.y },
+              { x: rightAnkle.x, y: rightAnkle.y }
+            );
+            if (leftKneeAngle <= 90 && rightKneeAngle <= 90 && !isInRep) {
+              isInRep = true;
+              startAutoTimer(currentTime);
+            } else if (leftKneeAngle > 140 && rightKneeAngle > 140 && isInRep && currentTime - lastRepTime > MIN_REP_INTERVAL) {
+              isInRep = false;
+              repCount++;
+              lastRepTime = currentTime;
+              updateMetrics();
+            }
+          }
+        } else if (currentExercise === 'pushups') {
+          const leftShoulder = smoothedLandmarks[11];
+          const leftElbow = smoothedLandmarks[13];
+          const leftWrist = smoothedLandmarks[15];
+          const rightShoulder = smoothedLandmarks[12];
+          const rightElbow = smoothedLandmarks[14];
+          const rightWrist = smoothedLandmarks[16];
+          const torsoAngle = calculateTorsoAngle(smoothedLandmarks);
+          if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist && torsoAngle < 30) {
+            const leftElbowAngle = calculateAngle(
+              { x: leftShoulder.x, y: leftShoulder.y },
+              { x: leftElbow.x, y: leftElbow.y },
+              { x: leftWrist.x, y: leftWrist.y }
+            );
+            const rightElbowAngle = calculateAngle(
+              { x: rightShoulder.x, y: rightShoulder.y },
+              { x: rightElbow.x, y: rightElbow.y },
+              { x: rightWrist.x, y: rightWrist.y }
+            );
+            if (leftElbowAngle <= 90 && rightElbowAngle <= 90 && !isInRep) {
+              isInRep = true;
+              startAutoTimer(currentTime);
+            } else if (leftElbowAngle > 140 && rightElbowAngle > 140 && isInRep && currentTime - lastRepTime > MIN_REP_INTERVAL) {
+              isInRep = false;
+              repCount++;
+              lastRepTime = currentTime;
+              updateMetrics();
+            }
+          }
+        } else if (currentExercise === 'situps') {
+          const leftShoulder = smoothedLandmarks[11];
+          const leftHip = smoothedLandmarks[23];
+          const rightShoulder = smoothedLandmarks[12];
+          const rightHip = smoothedLandmarks[24];
+          if (leftShoulder && leftHip && rightShoulder && rightHip) {
+            const torsoAngle = calculateTorsoAngle(smoothedLandmarks);
+            if (torsoAngle < 45 && !isInRep) {
+              isInRep = true;
+              startAutoTimer(currentTime);
+            } else if (torsoAngle > 80 && isInRep && currentTime - lastRepTime > MIN_REP_INTERVAL) {
+              isInRep = false;
+              repCount++;
+              lastRepTime = currentTime;
+              updateMetrics();
+            }
+          }
+        } else if (currentExercise === 'jumping_jacks') {
+          const leftShoulder = smoothedLandmarks[11];
+          const leftWrist = smoothedLandmarks[15];
+          const leftHip = smoothedLandmarks[23];
+          const leftAnkle = smoothedLandmarks[27];
+          const rightShoulder = smoothedLandmarks[12];
+          const rightWrist = smoothedLandmarks[16];
+          const rightHip = smoothedLandmarks[24];
+          const rightAnkle = smoothedLandmarks[28];
+          if (leftShoulder && leftWrist && leftHip && leftAnkle && rightShoulder && rightWrist && rightHip && rightAnkle) {
+            const armsUp = leftWrist.y < leftShoulder.y && rightWrist.y < rightShoulder.y;
+            const armsDown = leftWrist.y > leftHip.y && rightWrist.y > rightHip.y;
+            const legSpread = Math.abs(leftAnkle.x - rightAnkle.x) > 0.2;
+            if (armsUp && legSpread && !isInRep) {
+              isInRep = true;
+              startAutoTimer(currentTime);
+            } else if (armsDown && !legSpread && isInRep && currentTime - lastRepTime > MIN_REP_INTERVAL) {
+              isInRep = false;
+              repCount++;
+              lastRepTime = currentTime;
+              updateMetrics();
+            }
+          }
+        }
+      }
+      canvasCtx.restore();
+    }
+
+    function calculateAngle(A, B, C) {
+      const AB = Math.sqrt(Math.pow(B.x - A.x, 2) + Math.pow(B.y - A.y, 2));
+      const BC = Math.sqrt(Math.pow(B.x - C.x, 2) + Math.pow(B.y - C.y, 2));
+      const AC = Math.sqrt(Math.pow(C.x - A.x, 2) + Math.pow(C.y - A.y, 2));
+      const angle = Math.acos((BC * BC + AB * AB - AC * AC) / (2 * BC * AB));
+      return angle * (180 / Math.PI);
+    }
+
+    function calculateTorsoAngle(landmarks) {
+      const leftShoulder = landmarks[11];
+      const leftHip = landmarks[23];
+      const torsoVector = { x: leftShoulder.x - leftHip.x, y: leftShoulder.y - leftHip.y };
+      const verticalVector = { x: 0, y: -1 };
+      const dotProduct = torsoVector.y * verticalVector.y;
+      const magnitude = Math.sqrt(torsoVector.x ** 2 + torsoVector.y ** 2);
+      const angle = Math.acos(dotProduct / magnitude) * (180 / Math.PI);
+      return angle;
+    }
+
+    function updateMetrics() {
+      repCountElement.textContent = repCount;
+    }
+
+    function startAutoTimer(currentTime) {
+      if (!autoTimerStart) {
+        autoTimerStart = currentTime;
+        autoTimerInterval = setInterval(updateAutoTimer, 1000);
+      }
+    }
+
+    function updateAutoTimer() {
+      if (autoTimerStart) {
+        const elapsed = Math.floor((Date.now() - autoTimerStart) / 1000);
+        const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+        const seconds = (elapsed % 60).toString().padStart(2, '0');
+        autoTimerElement.textContent = `${minutes}:${seconds}`;
+      }
+    }
+
+    function switchTimerMode() {
+      const mode = document.getElementById("timerModeSelector").value;
+      isStopwatch = mode === "stopwatch";
+      document.getElementById("timerControls").style.display = isStopwatch ? "none" : "flex";
+      resetTimer();
+    }
+
+    function startTimer() {
+      clearInterval(timerInterval);
+      if (isStopwatch) {
+        manualTime = 0;
+      } else {
+        const mins = parseInt(document.getElementById("timerMinutes").value) || 0;
+        const secs = parseInt(document.getElementById("timerSeconds").value) || 0;
+        manualTime = mins * 60 + secs;
+      }
+      updateManualTimerDisplay();
+      timerInterval = setInterval(() => {
+        if (!isStopwatch && manualTime <= 0) {
+          clearInterval(timerInterval);
+          alert("Time's up!");
+          return;
+        }
+        manualTime += isStopwatch ? 1 : -1;
+        updateManualTimerDisplay();
+      }, 1000);
+    }
+
+    function stopTimer() {
+      clearInterval(timerInterval);
+    }
+
+    function resetTimer() {
+      clearInterval(timerInterval);
+      manualTime = isStopwatch ? 0 : 0;
+      updateManualTimerDisplay();
+    }
+
+    function updateManualTimerDisplay() {
+      const mins = Math.floor(Math.abs(manualTime) / 60);
+      const secs = Math.abs(manualTime) % 60;
+      document.getElementById("timeDisplay").textContent =
+        `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    function updateMode() {
+      const mode = document.getElementById("modeSelector").value;
+      document.body.classList.remove('desktop-mode', 'mobile-mode');
+      document.body.classList.add(`${mode}-mode`);
+    }
+
+    function updateExercise() {
+      currentExercise = document.getElementById("exerciseDropdown").value;
+      resetAll();
+    }
+
+    function resetExercise() {
+      document.getElementById("exerciseDropdown").value = "squats";
+      currentExercise = "squats";
+      resetAll();
+    }
+
+    function resetAll() {
+      repCount = 0;
+      autoTimerStart = null;
+      if (autoTimerInterval) {
+        clearInterval(autoTimerInterval);
+        autoTimerInterval = null;
+      }
+      isInRep = false;
+      lastRepTime = 0;
+      updateMetrics();
+      autoTimerElement.textContent = '00:00';
+      resetTimer();
+    }
+
+    function toggleTheme() {
+      document.body.classList.toggle('dark-mode');
+    }
+
+    function toggleAbout() {
+      const mainContent = document.getElementById('mainContent');
+      const aboutSection = document.getElementById('aboutSection');
+      const isAboutVisible = aboutSection.style.display === 'block';
+      mainContent.style.display = isAboutVisible ? 'flex' : 'none';
+      aboutSection.style.display = isAboutVisible ? 'none' : 'block';
+    }
+
+    async function startCamera() {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('Browser does not support webcam access.');
+        }
+        const camera = new Camera(videoElement, {
+          onFrame: async () => {
+            try {
+              await pose.send({ image: videoElement });
+            } catch (frameError) {
+              console.error('Error processing frame:', frameError);
+            }
+          },
+          width: 640,
+          height: 480
+        });
+        videoElement.onloadedmetadata = () => {
+          canvasElement.width = videoElement.width;
+          canvasElement.height = videoElement.height;
+        };
+        await camera.start();
+      } catch (error) {
+        console.error('Camera error:', error);
+        if (error.name !== 'NotAllowedError' && error.name !== 'NotFoundError') {
+          setTimeout(startCamera, 5000);
+        }
+      }
+    }
+
+    switchTimerMode();
+    updateMode();
+    startCamera();
+  </script>
+</body>
+</html>
